@@ -21,6 +21,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          # 'tools' is obsolete in current Android SDK repositories; install only platform-tools here.
+          packages: platform-tools
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses >/dev/null || true
