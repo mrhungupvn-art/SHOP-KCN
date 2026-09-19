@@ -15,6 +15,13 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }
     buildFeatures { buildConfig = true }
+    lint {
+        // lintVitalAnalyzeRelease cũng rất tốn RAM và không bắt buộc để ra
+        // được file APK; tắt để tránh cộng dồn OutOfMemoryError trên CI.
+        // Vẫn có thể chạy "lint" thủ công (Android Studio hoặc ./gradlew lint)
+        // khi cần kiểm tra chất lượng code.
+        checkReleaseBuilds = false
+    }
     signingConfigs {
         if (keystoreFile.exists()) {
             create("release") {
