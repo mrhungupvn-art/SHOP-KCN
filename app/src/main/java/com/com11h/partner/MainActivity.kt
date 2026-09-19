@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.speech.tts.TextToSpeech
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -67,6 +68,8 @@ class MainActivity : AppCompatActivity() {
     // lastPingSignature ở trên (đổi cho MỌI thay đổi pickup, kể cả do chính
     // Partner bấm Nhận đơn/Báo xong) chỉ dùng để tự làm mới danh sách.
     private var lastPendingCount: Int? = null
+    private var speechTts: TextToSpeech? = null
+    private var speechReady = false
     private val PING_INTERVAL_MS = 8000L
     private val PICK_IMAGE = 9001
     private val NEW_ORDER_CHANNEL_ID = "partner_new_orders"
@@ -111,6 +114,7 @@ class MainActivity : AppCompatActivity() {
 
             }
         }
+        initOrderSpeech()
         createNewOrderNotificationChannel()
         if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf("android.permission.POST_NOTIFICATIONS"), 12)
@@ -161,6 +165,30 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Khởi tạo đọc thông báo bằng giọng nói khi có đơn mới. */
+    private fun initOrderSpeech() {
+        speechTts = TextToSpeech(this) { result ->
+            speechReady = result == TextToSpeech.SUCCESS
+            if (speechReady) {
+                speechTts?.language = Locale("vi", "VN")
+                speechTts?.setSpeechRate(0.95f)
+                speechTts?.setPitch(1.0f)
+            }
+        }
+    }
+
+    private fun speakNewOrder() {
+        if (!speechReady) return
+        runCatching {
+            speechTts?.speak(
+                "Có đơn hàng mới cần làm",
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "partner_new_order_${System.currentTimeMillis()}"
+            )
+        }
+    }
+
     /** Tạo kênh thông báo "Đơn hàng mới" (âm thanh + rung) — cần gọi trước khi notify trên Android 8+. */
     private fun createNewOrderNotificationChannel() {
         if (Build.VERSION.SDK_INT < 26) return
@@ -181,6 +209,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 🔔 ĐƠN HÀNG MỚI — hiện thông báo hệ thống + rung + phát âm thanh (kể cả khi app đang mở). */
     private fun notifyNewOrder(pendingCount: Int) {
+        speakNewOrder()
         vibrateNewOrder()
         playNewOrderSound()
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) return
@@ -517,17 +546,126 @@ class MainActivity : AppCompatActivity() {
         thread {
             try {
                 val d = api.call("partner_ledger").optJSONObject("data") ?: JSONObject()
-                val a = d.optJSONArray("ledger") ?: JSONArray(); val summary = d.optJSONObject("summary")
+                val a = d.optJSONArray("ledger") ?: JSONArray()
+                val summary = d.optJSONObject("summary")
+                val now = Calendar.getInstance()
+                val week = aggregateLedger(a, periodStart(now, Calendar.WEEK_OF_YEAR))
+                val month = aggregateLedger(a, periodStart(now, Calendar.MONTH))
+                val year = aggregateLedger(a, periodStart(now, Calendar.YEAR))
+
                 runOnUiThread {
-                    content.removeAllViews(); content.addView(title("💰 Đối soát"))
-                    summary?.let { content.addView(hint("Tổng phát sinh: ${vnd(it.optInt("total"))} • Chờ đối soát: ${vnd(it.optInt("pending"))}")) }
-                    if (a.length() == 0) content.addView(hint("Chưa có phát sinh ledger."))
-                    for (i in 0 until a.length()) { val o = a.getJSONObject(i); content.addView(card().apply {
-                        addView(text("${o.optString("type")} • ${vnd(o.optInt("amount"))}", 17, true)); addView(text("Đơn #${o.optInt("order_id")} • ${o.optString("status")}", 14, false)); addView(text(o.optString("description"), 13, false)); addView(text(o.optString("created_at"), 12, false))
-                    }) }
+                    content.removeAllViews()
+                    content.addView(title("💰 Đối soát"))
+                    content.addView(hint("Tổng quan doanh thu • không hiển thị chi tiết từng đơn. Chi tiết đơn hàng xem tại Lịch sử."))
+
+                    addLedgerSummaryCard("📅 Tuần này", week.first, week.second)
+                    addLedgerSummaryCard("🗓️ Tháng này", month.first, month.second)
+                    addLedgerSummaryCard("📆 Năm nay", year.first, year.second)
+
+                    // Nếu máy chủ có sẵn summary tổng thể thì chỉ hiển thị một dòng phụ,
+                    // không kéo danh sách ledger chi tiết xuống giao diện.
+                    summary?.let {
+                        val total = it.optInt("total", Int.MIN_VALUE)
+                        val pending = it.optInt("pending", Int.MIN_VALUE)
+                        if (total != Int.MIN_VALUE || pending != Int.MIN_VALUE) {
+                            val parts = mutableListOf<String>()
+                            if (total != Int.MIN_VALUE) parts.add("Tổng phát sinh: ${vnd(total)}")
+                            if (pending != Int.MIN_VALUE) parts.add("Chờ đối soát: ${vnd(pending)}")
+                            if (parts.isNotEmpty()) content.addView(hint(parts.joinToString(" • ")))
+                        }
+                    }
+
+                    if (a.length() == 0) content.addView(hint("Chưa có phát sinh doanh thu."))
                 }
             } catch (e: Exception) { runOnUiThread { toast(e.message) } }
         }
+    }
+
+    private fun addLedgerSummaryCard(label: String, orders: Int, revenue: Int) {
+        content.addView(card().apply {
+            addView(text(label, 18, true))
+            addView(text("$orders đơn hàng", 17, false))
+            addView(text("Doanh thu: ${vnd(revenue)}", 20, true))
+        })
+    }
+
+    private fun aggregateLedger(a: JSONArray, cutoff: Calendar): Pair<Int, Int> {
+        val now = Calendar.getInstance()
+        val orderAmounts = linkedMapOf<Int, Int>()
+        var anonymousRevenue = 0
+        var anonymousCount = 0
+
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            val date = parseLedgerDate(o.optString("created_at")) ?: continue
+            if (date.before(cutoff) || date.after(now)) continue
+
+            val amount = ledgerAmount(o)
+            val orderId = o.optInt("order_id", 0)
+            if (orderId > 0) {
+                // Một đơn có thể có nhiều dòng ledger. Giữ số tiền lớn nhất
+                // của đơn để tránh cộng trùng doanh thu.
+                val previous = orderAmounts[orderId]
+                if (previous == null || amount > previous) orderAmounts[orderId] = amount
+            } else {
+                anonymousCount++
+                anonymousRevenue += amount
+            }
+        }
+
+        return Pair(orderAmounts.size + anonymousCount, orderAmounts.values.sum() + anonymousRevenue)
+    }
+
+    private fun periodStart(now: Calendar, field: Int): Calendar {
+        val start = (now.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            when (field) {
+                Calendar.WEEK_OF_YEAR -> {
+                    firstDayOfWeek = Calendar.MONDAY
+                    set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                }
+                Calendar.MONTH -> {
+                    set(Calendar.DAY_OF_MONTH, 1)
+                }
+                Calendar.YEAR -> {
+                    set(Calendar.DAY_OF_YEAR, 1)
+                }
+            }
+        }
+        return start
+    }
+
+    private fun ledgerAmount(o: JSONObject): Int {
+        val keys = arrayOf("amount", "order_total", "grand_total", "total", "revenue")
+        for (key in keys) {
+            if (o.has(key) && !o.isNull(key)) {
+                val value = o.optLong(key, Long.MIN_VALUE)
+                if (value != Long.MIN_VALUE) return value.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+            }
+        }
+        return 0
+    }
+
+    private fun parseLedgerDate(raw: String): Calendar? {
+        if (raw.isBlank()) return null
+        val formats = arrayOf(
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd"
+        )
+        for (pattern in formats) {
+            runCatching {
+                val sdf = SimpleDateFormat(pattern, Locale.US)
+                sdf.timeZone = TimeZone.getDefault()
+                val date = sdf.parse(raw) ?: return@runCatching
+                return Calendar.getInstance().apply { time = date }
+            }
+        }
+        return null
     }
 
     private fun loadAccount() {
@@ -558,5 +696,12 @@ class MainActivity : AppCompatActivity() {
     private fun text(s: String, size: Int, bold: Boolean) = TextView(this).apply { text = s; textSize = size.toFloat(); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 3, 0, 3) }
     private fun vnd(n: Int) = "%,d đ".format(n).replace(',', '.')
     private fun toast(s: String?) = Toast.makeText(this, s ?: "Có lỗi", Toast.LENGTH_SHORT).show()
+    override fun onDestroy() {
+        speechTts?.stop()
+        speechTts?.shutdown()
+        speechTts = null
+        super.onDestroy()
+    }
+
     private fun scheduleSync() { val r = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build(); WorkManager.getInstance(this).enqueueUniquePeriodicWork("partner_sync", ExistingPeriodicWorkPolicy.UPDATE, r) }
 }
