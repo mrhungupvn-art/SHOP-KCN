@@ -456,9 +456,29 @@ class MainActivity : AppCompatActivity() {
         c.addView(text("Danh mục: ${o.optString("category", session.category())}", 13, false))
         c.addView(text("Giá: ${vnd(o.optInt("price"))} • ${if (o.optInt("is_active") == 1) "Đang bán" else "Chờ/ẩn"}", 14, false))
         c.addView(hint("Tên món, giá, danh mục và trạng thái bán do Admin quản lý."))
-        val row = LinearLayout(this); val stock = EditText(this).apply { setText(o.optInt("stock").toString()); inputType = InputType.TYPE_CLASS_NUMBER; hint = "Tồn kho" }
-        val save = Button(this).apply { text = "Lưu tồn" }; val image = Button(this).apply { text = "📷 Đổi ảnh" }
-        row.addView(stock, LinearLayout.LayoutParams(0, -2, 1f)); row.addView(save, LinearLayout.LayoutParams(0, -2, 1f)); c.addView(row); c.addView(image)
+        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val stockLabel = TextView(this).apply {
+            text = "Số lượng hàng còn :"
+            textSize = 15f
+            setTextColor(android.graphics.Color.rgb(35, 35, 35))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, 6, 10, 6)
+        }
+        val stock = EditText(this).apply {
+            setText(o.optInt("stock").toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(android.graphics.Color.rgb(25, 25, 25))
+            setHintTextColor(android.graphics.Color.rgb(100, 100, 100))
+            textSize = 16f
+            singleLine = true
+            minWidth = 72
+        }
+        val save = Button(this).apply { text = "Lưu" }
+        val image = Button(this).apply { text = "📷 Đổi ảnh" }
+        row.addView(stockLabel, LinearLayout.LayoutParams(-2, -2))
+        row.addView(stock, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(save, LinearLayout.LayoutParams(-2, -2))
+        c.addView(row); c.addView(image)
         save.setOnClickListener { updateFood(o.optInt("id"), stock.text.toString().toIntOrNull() ?: 0, null) }
         image.setOnClickListener {
             pendingCreateName = ""; imagePickerMode = "update:${o.optInt("id")}:${stock.text}"; openImagePicker()
@@ -693,7 +713,13 @@ class MainActivity : AppCompatActivity() {
     private fun card() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(18, 18, 18, 18); setBackgroundResource(android.R.drawable.dialog_holo_light_frame); layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12 } }
     private fun title(s: String) = text(s, 20, true).apply { setPadding(0, 18, 0, 4) }
     private fun hint(s: String) = text(s, 14, false)
-    private fun text(s: String, size: Int, bold: Boolean) = TextView(this).apply { text = s; textSize = size.toFloat(); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD); setPadding(0, 3, 0, 3) }
+    private fun text(s: String, size: Int, bold: Boolean) = TextView(this).apply {
+        text = s
+        textSize = size.toFloat()
+        setTextColor(android.graphics.Color.rgb(35, 35, 35))
+        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, 3, 0, 3)
+    }
     private fun vnd(n: Int) = "%,d đ".format(n).replace(',', '.')
     private fun toast(s: String?) = Toast.makeText(this, s ?: "Có lỗi", Toast.LENGTH_SHORT).show()
     override fun onDestroy() {
