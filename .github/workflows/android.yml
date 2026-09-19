@@ -1,0 +1,57 @@
+name: Android APK
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      API_BASE_URL: ${{ secrets.API_BASE_URL }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Restore release keystore (nếu có đủ 4 secret)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        # KHÔNG hard-fail khi thiếu secret nữa: build.gradle.kts đã tự kiểm
+        # tra file("release.keystore") có tồn tại hay không để quyết định ký
+        # hay không (xem signingConfigs trong app/build.gradle.kts). Thiếu
+        # keystore chỉ khiến APK release KHÔNG được ký — vẫn build ra file
+        # để cài thử (Internal testing/thiết bị test), chỉ không nộp được
+        # lên Play Store cho tới khi có keystore thật.
+        # Chạy workflow "Create COM11H Keystore" (create-keystore.yml) 1 lần
+        # để tự sinh keystore mới nếu bạn chưa có sẵn.
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > app/release.keystore
+            echo "✅ Đã khôi phục keystore — APK release sẽ được KÝ."
+          else
+            echo "⚠️ Thiếu 1 hoặc nhiều secret (KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD)."
+            echo "⚠️ APK release lần build này sẽ KHÔNG được ký (chỉ dùng để cài thử, KHÔNG nộp Play Store)."
+            echo "⚠️ Chạy workflow 'Create COM11H Keystore' rồi thêm đủ 4 secret ở Settings → Secrets and variables → Actions để có bản ký thật."
+          fi
+      - name: Build release APK
+        run: gradle :app:assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: com11h-shop-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
