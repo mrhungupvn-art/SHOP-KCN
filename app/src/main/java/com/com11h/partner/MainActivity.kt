@@ -470,7 +470,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(android.graphics.Color.rgb(25, 25, 25))
             setHintTextColor(android.graphics.Color.rgb(100, 100, 100))
             textSize = 16f
-            singleLine = true
+            setSingleLine(true)
             minWidth = 72
         }
         val save = Button(this).apply { text = "Lưu" }
