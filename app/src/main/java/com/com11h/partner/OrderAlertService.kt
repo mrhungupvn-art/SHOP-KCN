@@ -23,7 +23,8 @@ import kotlin.concurrent.thread
 /**
  * Cảnh báo đơn mới cho Shop.
  *
- * Chỉ báo khi pickup thuộc shop đã được thanh toán (payment_status=paid).
+ * Chỉ báo khi pickup thuộc shop đã được Admin xác nhận (áp dụng cho cả đơn
+ * thanh toán QR lẫn đơn COD duyệt tay — xem partner_ping_summary() trong core.php).
  * Mỗi đơn mới: rung + đọc 3 lần, bắt đầu mỗi lần cách nhau 2 giây.
  */
 class OrderAlertService : Service() {
@@ -113,13 +114,13 @@ class OrderAlertService : Service() {
             val engine = tts ?: return@TextToSpeech
             val vi = Locale("vi", "VN")
             runCatching {
-                val maleVoice = engine.voices.orEmpty().firstOrNull {
+                val femaleVoice = engine.voices.orEmpty().firstOrNull {
                     it.locale.language.equals("vi", true) &&
-                        it.name.lowercase(Locale.ROOT).contains("male")
+                        it.name.lowercase(Locale.ROOT).contains("female")
                 }
-                if (maleVoice != null) engine.voice = maleVoice else engine.language = vi
-                engine.setSpeechRate(0.92f)
-                engine.setPitch(0.72f)
+                if (femaleVoice != null) engine.voice = femaleVoice else engine.language = vi
+                engine.setSpeechRate(1.02f)
+                engine.setPitch(1.22f)   // tăng cao độ để giọng thanh, trong trẻo hơn
             }
             ttsReady = true
         }
